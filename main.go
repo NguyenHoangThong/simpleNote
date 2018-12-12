@@ -2,11 +2,12 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 	"log"
 	"net/http"
-	_ "github.com/lib/pq"
 )
 
 var db *sql.DB
@@ -48,18 +49,86 @@ func initDb () {
 	fmt.Println("Successfully connected!")
 }
 
+
 func main() {
 	initDb()
 	defer db.Close()
 	http.HandleFunc("/api/index", indexHandler)
-	http.HandleFunc("/api/repo/", repoHandler)
+
 	log.Fatal(http.ListenAndServe("localhost:8000", nil))
 }
 
-func indexHandler(w http.ResponseWriter, r *http.Request) {
-	//...
+type repositorySummary struct {
+	ID         int
+	Name       string
+	Owner      string
+	TotalStars int
 }
 
-func repoHandler(w http.ResponseWriter, r *http.Request) {
-	//...
+type repositories struct {
+	Repositories []repositorySummary
 }
+
+// indexHandler calls `queryRepos()` and marshals the result as JSON
+func indexHandler(w http.ResponseWriter, req *http.Request) {
+	repos := repositories{}
+
+	err := queryRepos(&repos)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	out, err := json.Marshal(repos)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
+
+	fmt.Fprintf(w, string(out))
+}
+
+// queryRepos first fetches the repositories data from the db
+func queryRepos(repos *repositories) error {
+	rows, err := db.Query(`
+		SELECT
+			id,
+			owner,
+			name,
+			total_stars
+		FROM repositories
+		ORDER BY total_stars DESC`)
+
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		repo := repositorySummary{}
+		err = rows.Scan(
+			&repo.ID,
+			&repo.Owner,
+			&repo.Name,
+			&repo.TotalStars,
+		)
+		if err != nil {
+			return err
+		}
+		repos.Repositories = append(repos.Repositories, repo)
+	}
+	err = rows.Err()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+//func indexHandler(w http.ResponseWriter, r *http.Request) {
+//	//...
+//	fmt.Fprintf(w, string("hello"))
+//
+//}
+//
+//func repoHandler(w http.ResponseWriter, r *http.Request) {
+//	//...
+//}
